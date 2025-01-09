@@ -1,6 +1,8 @@
 #include "ManualMapper.hpp"
 
-bool ManualMapper::setupHeaders()
+
+bool ManualMapper::run()
 {
+
 	return false;
 }

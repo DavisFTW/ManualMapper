@@ -38,13 +38,50 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    BYTE* pSrcData = nullptr; // Will hold the DLL data
-    SIZE_T fileSize = 0;      // Will hold the size of the DLL file
+    std::ifstream File(dllPath, std::ios::binary | std::ios::ate);
 
-    if (!Utils::LoadDllFile(dllPath, pSrcData, fileSize, procHandle)) {
-        printf("Failed to load DLL file.\n");
-        return EXIT_FAILURE;
+    if (File.fail()) {
+        printf("Opening the file failed: %X\n", (DWORD)File.rdstate());
+        File.close();
+        CloseHandle(procHandle);
+        system("PAUSE");
+        return -5;
     }
 
+    auto FileSize = File.tellg();
+    if (FileSize < 0x1000) {
+        printf("Filesize invalid.\n");
+        File.close();
+        CloseHandle(procHandle);
+        system("PAUSE");
+        return -6;
+    }
+
+    // maps the dll into our process we can now close file 
+    BYTE* pSrcData = new BYTE[(UINT_PTR)FileSize];  
+    if (!pSrcData) {
+        printf("Can't allocate dll file.\n");
+        File.close();
+        CloseHandle(procHandle);
+        system("PAUSE");
+        return -7;
+    }
+
+    File.seekg(0, std::ios::beg);
+    File.read((char*)(pSrcData), FileSize);
+    File.close();
+
+    const auto mapper = std::make_unique<ManualMapper>(procHandle, pSrcData, FileSize);
+
+    if (!mapper->run()) {
+        system("PAUSE");
+        std::cerr << "mapper failed\n";
+        CloseHandle(procHandle);
+        delete[] pSrcData;
+    }
+
+    
+    CloseHandle(procHandle);
+    delete[] pSrcData;
     return EXIT_SUCCESS;
 }
