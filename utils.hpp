@@ -13,7 +13,7 @@ namespace Utils {
     constexpr DWORD PROCESS_NOT_FOUND = static_cast<DWORD>(-3);
 
     const DWORD getProcId(const char* procName);
-    std::optional<std::streampos> resolveDll(const char* dllPath);
+    bool LoadDllFile(const char* dllPath, BYTE*& pSrcData, SIZE_T& fileSize, HANDLE procHandle);
     bool ElevatePrivilege(const char* privilegeName);
 }
 

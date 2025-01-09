@@ -29,21 +29,43 @@ namespace Utils {
         return PROCESS_NOT_FOUND;
     }
 
-    std::optional<std::streampos> resolveDll(const char* dllPath) {
-        std::ifstream File(dllPath, std::ios::binary | std::ios::ate);
-
-        if (!File.is_open()) {
-            std::cerr << "Error: Could not open file at " << dllPath << "\n";
-            return std::nullopt;
-        }
-        const auto FileSize = File.tellg();
-
-        if (FileSize < 0x1000) {
-            std::cerr << "Invalid DLL file\n";
-            return std::nullopt;
+    bool LoadDllFile(const char* dllPath, BYTE*& pSrcData, SIZE_T& fileSize, HANDLE procHandle) {
+        // Open the file in binary mode and position at the end to get the size
+        std::ifstream file(dllPath, std::ios::binary | std::ios::ate);
+        if (file.fail()) {
+            printf("Opening the file failed: %X\n", (DWORD)file.rdstate());
+            file.close();
+            CloseHandle(procHandle);
+            system("PAUSE");
+            return false;
         }
 
-        return FileSize;
+        // Get the size of the file
+        fileSize = static_cast<SIZE_T>(file.tellg());
+        if (fileSize < 0x1000) {
+            printf("Filesize invalid.\n");
+            file.close();
+            CloseHandle(procHandle);
+            system("PAUSE");
+            return false;
+        }
+
+        // Allocate memory for the DLL data
+        pSrcData = new BYTE[fileSize];
+        if (!pSrcData) {
+            printf("Can't allocate memory for the DLL file.\n");
+            file.close();
+            CloseHandle(procHandle);
+            system("PAUSE");
+            return false;
+        }
+
+        // Read the file into memory
+        file.seekg(0, std::ios::beg);
+        file.read(reinterpret_cast<char*>(pSrcData), fileSize);
+        file.close();
+
+        return true; // Successfully loaded the file
     }
 
     bool ElevatePrivilege(const char* privilegeName) {
