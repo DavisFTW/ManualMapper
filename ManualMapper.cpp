@@ -9,12 +9,12 @@ void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData)
 	// fix relocatios if needed ( base - preffered ) 
 
 	if (!mData) {
-		mData->hMod = reinterpret_cast<HINSTANCE>(0xDEADBEEF);  // best error handling
+		mData->hMod = reinterpret_cast<HINSTANCE>(0x0);  // best error handling
 		std::cerr << "mData was invalid!\n";
 		return;
 	}
 
-	// fix relocations if needed
+	
 
 	 BYTE* pBase = mData->pbase;
 	
@@ -30,6 +30,8 @@ void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData)
 	
 	const BYTE* locationDelta = pBase - pOpt->ImageBase; // if we actually manage to set our dll inside a preffered image base no reloactions are needed
 
+
+	// align mapped  dll if needed 
 	if (locationDelta) {
 		if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size) {   // if its valid
 			 auto* pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
@@ -50,7 +52,17 @@ void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData)
 		}
 	}
 
-	// execute TLS 
+	// get import descriptor
+
+	// load dll
+
+	// Get the first Original Thunk and The firstThunk verify them
+
+	// use ILT to get the ordinal or name
+
+	// use IAT to fix the corresponding imports address by using _getProcAddress
+
+
 }
 
 bool ManualMapper::run()
