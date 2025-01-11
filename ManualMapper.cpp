@@ -59,15 +59,14 @@ void ManualMapper::debug() const {
 }
 
 
-bool ManualMapper::run()
-{
-	if (reinterpret_cast<IMAGE_DOS_HEADER*>(this->srcData_)->e_magic != 0x5A4D){ // signature
+bool ManualMapper::run() {
+	if (reinterpret_cast<IMAGE_DOS_HEADER*>(this->srcData_)->e_magic != 0x5A4D) { // signature
 		std::cerr << "Invalid Header Signature\n";
 		return false;
 	}
 
 	this->pOldNtHeader = reinterpret_cast<IMAGE_NT_HEADERS*>(this->srcData_ + reinterpret_cast<IMAGE_DOS_HEADER*>(this->srcData_)->e_lfanew);
-	
+
 	this->pOldOptHeader = &this->pOldNtHeader->OptionalHeader;
 	this->pOldFileHeader = &this->pOldNtHeader->FileHeader;
 
@@ -77,13 +76,13 @@ bool ManualMapper::run()
 
 	this->pTargetBase = reinterpret_cast<BYTE*>(VirtualAllocEx(this->handle_, nullptr, pOldOptHeader->SizeOfImage, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
 	if (!pTargetBase) {
-		
+
 		return false;
 	}
 
 	DWORD oldProtection = 0;
 	VirtualProtectEx(this->handle_, this->pTargetBase, pOldOptHeader->SizeOfImage, PAGE_EXECUTE_READWRITE, &oldProtection);
-	
+
 	//  i need to make this more advanced as the dll that gets manual mapped inside the process wil still call LoadLibraryA and getProcAddress which can be monitored by any detection tool
 
 	MANUAL_MAPPING_DATA data{ 0 };
@@ -100,7 +99,7 @@ bool ManualMapper::run()
 		VirtualFreeEx(this->handle_, pTargetBase, 0, MEM_RELEASE);
 		return false;
 	}
-	
+
 	// resolve all sections like .text .data .rdata 
 
 	IMAGE_SECTION_HEADER* pSectionHeader = IMAGE_FIRST_SECTION(pOldNtHeader);
@@ -151,9 +150,51 @@ bool ManualMapper::run()
 
 	this->debug();
 
+	HANDLE hThread = CreateRemoteThread(this->handle_, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode), MappingDataAlloc, 0, nullptr);
+	if (!hThread) {
+		std::cerr << "thread Creation failed\n" << GetLastError();
+		VirtualFreeEx(this->handle_, pTargetBase, 0, MEM_RELEASE);
+		VirtualFreeEx(this->handle_, MappingDataAlloc, 0, MEM_RELEASE);
+		VirtualFreeEx(this->handle_, pShellcode, 0, MEM_RELEASE);
+		return false;
+	}
+	CloseHandle(hThread);
 
+	std::cout << "Thread created at " << pShellcode << " Waiting for shellcode to be executed" << std::endl;
 
+	HINSTANCE hCheck = 0;
 
+	while (!hCheck) {
+		DWORD exitCode = 0;
+		GetExitCodeProcess(this->handle_, &exitCode);
+
+		if (exitCode != STILL_ACTIVE) {
+			std::cerr << "Target Process Crashed" << exitCode;
+			return false;
+		}
+
+		MANUAL_MAPPING_DATA data_checked{ 0 };
+		ReadProcessMemory(this->handle_, MappingDataAlloc, &data_checked, sizeof(data_checked), nullptr);
+		hCheck = data_checked.hMod;
+
+		if (hCheck == (HINSTANCE)0x0) {
+			VirtualFreeEx(this->handle_, pTargetBase, 0, MEM_RELEASE);
+			VirtualFreeEx(this->handle_, MappingDataAlloc, 0, MEM_RELEASE);
+			VirtualFreeEx(this->handle_, pShellcode, 0, MEM_RELEASE);
+			return false;
+		}
+
+		VirtualFreeEx(this->handle_, pTargetBase, 0, MEM_RELEASE);
+		VirtualFreeEx(this->handle_, MappingDataAlloc, 0, MEM_RELEASE);
+		VirtualFreeEx(this->handle_, pShellcode, 0, MEM_RELEASE);
+
+		//pause
+		std::cerr << "Manual Mapping finished Press Enter to continue...\n";
+		std::cin.get();
+
+		return true;
+
+	}
 }
 void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 
@@ -164,8 +205,6 @@ void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 		std::cerr << "mData was invalid!\n";
 		return;
 	}
-
-
 
 	BYTE* pBase = mData->pbase;
 
