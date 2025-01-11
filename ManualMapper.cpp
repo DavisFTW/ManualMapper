@@ -3,8 +3,7 @@
 #define RELOC_FLAG32(RelInfo) ((RelInfo >> 0x0C) == IMAGE_REL_BASED_HIGHLOW)
 #define RELOC_FLAG64(RelInfo) ((RelInfo >> 0x0C) == IMAGE_REL_BASED_DIR64)
 
-void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData)
-{
+void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData) {
 
 	// fix relocatios if needed ( base - preffered ) 
 
@@ -53,16 +52,39 @@ void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData)
 	}
 
 	// get import descriptor
+	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size) {
+		auto* pImportDescriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+		while (pImportDescriptor->Name) {
 
-	// load dll
+			// dll is valid, load the sucker
+			const char* moduleName = reinterpret_cast<char*>(pBase + pImportDescriptor->Name);
+			HINSTANCE hDll = _LoadLibraryA(moduleName);
+			ULONG_PTR* pOrigThunk = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->OriginalFirstThunk);
+			ULONG_PTR* pFunc = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->FirstThunk);
 
-	// Get the first Original Thunk and The firstThunk verify them
+			if (!pOrigThunk) { // sometimes they can be the same and IAT contains both
+				pOrigThunk = pFunc;
+			}
 
-	// use ILT to get the ordinal or name
+			// parse all data ILT IAT correspondingly 
 
-	// use IAT to fix the corresponding imports address by using _getProcAddress
+			for (; *pOrigThunk; ++pOrigThunk, ++pFunc) { // both need to be upped so we can have the equal things
+				if (IMAGE_SNAP_BY_ORDINAL(*pOrigThunk)) { // if the import is by number
+					*pFunc = reinterpret_cast<ULONG_PTR>(_GetProcAddress(hDll, reinterpret_cast<char*>(*pOrigThunk & 0xFFF))); // this might cause issues or not
+				}
+				else { // by name
+					auto* pImport = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(pBase + (*pOrigThunk));
+					*pOrigThunk = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
+				}
 
+			}
+			++pImportDescriptor;
+		}
+		// use ILT to get the ordinal or name
 
+		// use IAT to fix the corresponding imports address by using _getProcAddress
+
+	}
 }
 
 bool ManualMapper::run()
