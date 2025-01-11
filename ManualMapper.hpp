@@ -29,6 +29,9 @@ struct MANUAL_MAPPING_DATA
 	//BOOL SEHSupport; // SEH doesnt work so implement this ? 
 };
 
+
+void __stdcall shellcode(MANUAL_MAPPING_DATA* mData);
+
 class ManualMapper
 {
 private:
@@ -45,12 +48,13 @@ private:
 	IMAGE_FILE_HEADER* pOldFileHeader = nullptr;
 	BYTE* pTargetBase = nullptr;
 
+	void debug() const;
 public:
 	ManualMapper(const HANDLE handle, BYTE* srcData, std::streampos fileSize)
 		: handle_(handle), srcData_(srcData), fileSize_(fileSize) {}
 
 	bool run();
-	void __stdcall shellcode(MANUAL_MAPPING_DATA* mData);
+	//void __stdcall shellcode(MANUAL_MAPPING_DATA* mData);
 };
 
 namespace memory{

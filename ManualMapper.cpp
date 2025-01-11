@@ -3,96 +3,61 @@
 #define RELOC_FLAG32(RelInfo) ((RelInfo >> 0x0C) == IMAGE_REL_BASED_HIGHLOW)
 #define RELOC_FLAG64(RelInfo) ((RelInfo >> 0x0C) == IMAGE_REL_BASED_DIR64)
 
-void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData) {
 
-	// fix relocatios if needed ( base - preffered ) 
+void ManualMapper::debug() const {
+	std::cerr << "ManualMapper Debug Information:\n";
+	std::cerr << "--------------------------------\n";
 
-	if (!mData) {
-		mData->hMod = reinterpret_cast<HINSTANCE>(0x0);  // best error handling
-		std::cerr << "mData was invalid!\n";
-		return;
+	// Print handle and file size
+	std::cerr << "Target Process Handle: " << handle_ << "\n";
+	std::cerr << "Source Data Pointer: " << static_cast<void*>(srcData_) << "\n";
+	std::cerr << "Source File Size: " << fileSize_ << " bytes\n";
+
+	// Print NT Headers information
+	if (pOldNtHeader) {
+		std::cerr << "IMAGE_NT_HEADERS:\n";
+		std::cerr << "  Signature: " << std::hex << pOldNtHeader->Signature << "\n";
+	}
+	else {
+		std::cerr << "IMAGE_NT_HEADERS: Not Initialized\n";
 	}
 
-	
-
-	 BYTE* pBase = mData->pbase;
-	
-	const auto* pOpt = &reinterpret_cast<IMAGE_NT_HEADERS*>(pBase + reinterpret_cast<IMAGE_DOS_HEADER*>((uintptr_t)pBase)->e_lfanew)->OptionalHeader;
-
-
-	const auto _LoadLibraryA = mData->pLoadLibraryA;
-	const auto _GetProcAddress = mData->pGetProcAddress;
-
-	auto _DllMain = reinterpret_cast<f_DLL_ENTRY_POINT>(pBase + pOpt->AddressOfEntryPoint);
-
-	auto _RtlAddFunctionTable = mData->pRtlAddFunctionTable;
-	
-	const BYTE* locationDelta = pBase - pOpt->ImageBase; // if we actually manage to set our dll inside a preffered image base no reloactions are needed
-
-
-	// align mapped  dll if needed 
-	if (locationDelta) {
-		if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size) {   // if its valid
-			 auto* pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-			 auto* pRelocEnd = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<uintptr_t>(pRelocData) + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
-			// everything is valid, parse it
-			while (pRelocData < pRelocEnd && pRelocData->SizeOfBlock) {
-				UINT AmountOfEntries = (pRelocData->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
-				WORD* pRelativeInfo = reinterpret_cast<WORD*>(pRelocData + 1);  // pRelocData should point to IMAGE_BASE_RELOCATION adding + 1 makes it point to the next first relocation entry in the current block 1 = 8 bytes
-			
-				for (UINT i = 0; i != AmountOfEntries; ++i, ++pRelativeInfo) {
-					if (RELOC_FLAG64(*pRelativeInfo)) {
-						UINT_PTR* pPatch = reinterpret_cast<UINT_PTR*>(pBase + pRelocData->VirtualAddress + ((*pRelativeInfo) & 0xFFF));
-						*pPatch += reinterpret_cast<UINT_PTR>(locationDelta);
-					}
-				}
-				pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<BYTE*>(pRelocData) + pRelocData->SizeOfBlock);  // move further
-			}
-		}
+	// Print Optional Header information
+	if (pOldOptHeader) {
+		std::cerr << "IMAGE_OPTIONAL_HEADER:\n";
+		std::cerr << "  ImageBase: " << std::hex << pOldOptHeader->ImageBase << "\n";
+		std::cerr << "  SizeOfImage: " << pOldOptHeader->SizeOfImage << " bytes\n";
+		std::cerr << "  AddressOfEntryPoint: " << std::hex << pOldOptHeader->AddressOfEntryPoint << "\n";
+	}
+	else {
+		std::cerr << "IMAGE_OPTIONAL_HEADER: Not Initialized\n";
 	}
 
-	// get import descriptor
-	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size) {
-		auto* pImportDescriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-		while (pImportDescriptor->Name) {
-
-			// dll is valid, load the sucker
-			const char* moduleName = reinterpret_cast<char*>(pBase + pImportDescriptor->Name);
-			HINSTANCE hDll = _LoadLibraryA(moduleName);
-			ULONG_PTR* pOrigThunk = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->OriginalFirstThunk);
-			ULONG_PTR* pFunc = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->FirstThunk);
-
-			if (!pOrigThunk) { // sometimes they can be the same and IAT contains both
-				pOrigThunk = pFunc;
-			}
-
-			// parse all data ILT IAT correspondingly 
-
-			for (; *pOrigThunk; ++pOrigThunk, ++pFunc) { // both need to be upped so we can have the equal things
-				if (IMAGE_SNAP_BY_ORDINAL(*pOrigThunk)) { // if the import is by number
-					*pFunc = reinterpret_cast<ULONG_PTR>(_GetProcAddress(hDll, reinterpret_cast<char*>(*pOrigThunk & 0xFFF))); // this might cause issues or not
-				}
-				else { // by name
-					auto* pImport = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(pBase + (*pOrigThunk));
-					*pOrigThunk = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
-				}
-
-			}
-			++pImportDescriptor;
-		}
+	// Print File Header information
+	if (pOldFileHeader) {
+		std::cerr << "IMAGE_FILE_HEADER:\n";
+		std::cerr << "  Machine: " << std::hex << pOldFileHeader->Machine << "\n";
+		std::cerr << "  NumberOfSections: " << pOldFileHeader->NumberOfSections << "\n";
+		std::cerr << "  Characteristics: " << std::hex << pOldFileHeader->Characteristics << "\n";
+	}
+	else {
+		std::cerr << "IMAGE_FILE_HEADER: Not Initialized\n";
 	}
 
-	// FIX TLS 
-
-	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size) {
-		auto* pTLS = reinterpret_cast<IMAGE_TLS_DIRECTORY*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
-		auto* pCallback = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(pTLS->AddressOfCallBacks);
-		for (; pCallback && *pCallback; ++pCallback)
-			(*pCallback)(pBase, DLL_PROCESS_ATTACH, nullptr);
+	// Print target base allocation
+	if (pTargetBase) {
+		std::cerr << "Target Base Address: " << static_cast<void*>(pTargetBase) << "\n";
+	}
+	else {
+		std::cerr << "Target Base Address: Not Allocated\n";
 	}
 
-	mData->hMod = reinterpret_cast<HINSTANCE>(pBase);
+	std::cerr << "--------------------------------\n";
+
+	std::cerr << "Press Enter to continue...\n";
+	std::cin.get();
 }
+
 
 bool ManualMapper::run()
 {
@@ -176,11 +141,107 @@ bool ManualMapper::run()
 		return false;
 	}
 
-	if (!memory::Write(this->handle_, pShellcode, Shellcode, 0x1000)) {
-		std::cerr << "Error: Can't write shellcode. Error Code: " << GetLastError() << "\n";
-		VirtualFreeEx(this->handle_, pTargetBase, 0, MEM_RELEASE);
-		VirtualFreeEx(this->handle_, MappingDataAlloc, 0, MEM_RELEASE);
-		VirtualFreeEx(this->handle_, pShellcode, 0, MEM_RELEASE);
+	if (!WriteProcessMemory(handle_, pShellcode, shellcode, 0x1000, nullptr)) {
+		std::cerr << "Cant write shellcode\n";
+		VirtualFreeEx(handle_, pTargetBase, 0, MEM_RELEASE);
+		VirtualFreeEx(handle_, MappingDataAlloc, 0, MEM_RELEASE);
+		VirtualFreeEx(handle_, pShellcode, 0, MEM_RELEASE);
 		return false;
 	}
+
+	this->debug();
+
+
+
+
+}
+void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
+
+	// fix relocatios if needed ( base - preffered ) 
+
+	if (!mData) {
+		mData->hMod = reinterpret_cast<HINSTANCE>(0x0);  // best error handling
+		std::cerr << "mData was invalid!\n";
+		return;
+	}
+
+
+
+	BYTE* pBase = mData->pbase;
+
+	const auto* pOpt = &reinterpret_cast<IMAGE_NT_HEADERS*>(pBase + reinterpret_cast<IMAGE_DOS_HEADER*>((uintptr_t)pBase)->e_lfanew)->OptionalHeader;
+
+
+	const auto _LoadLibraryA = mData->pLoadLibraryA;
+	const auto _GetProcAddress = mData->pGetProcAddress;
+
+	auto _DllMain = reinterpret_cast<f_DLL_ENTRY_POINT>(pBase + pOpt->AddressOfEntryPoint);
+
+	auto _RtlAddFunctionTable = mData->pRtlAddFunctionTable;
+
+	const BYTE* locationDelta = pBase - pOpt->ImageBase; // if we actually manage to set our dll inside a preffered image base no reloactions are needed
+
+
+	// align mapped  dll if needed 
+	if (locationDelta) {
+		if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size) {   // if its valid
+			auto* pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+			auto* pRelocEnd = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<uintptr_t>(pRelocData) + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size);
+			// everything is valid, parse it
+			while (pRelocData < pRelocEnd && pRelocData->SizeOfBlock) {
+				UINT AmountOfEntries = (pRelocData->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
+				WORD* pRelativeInfo = reinterpret_cast<WORD*>(pRelocData + 1);  // pRelocData should point to IMAGE_BASE_RELOCATION adding + 1 makes it point to the next first relocation entry in the current block 1 = 8 bytes
+
+				for (UINT i = 0; i != AmountOfEntries; ++i, ++pRelativeInfo) {
+					if (RELOC_FLAG64(*pRelativeInfo)) {
+						UINT_PTR* pPatch = reinterpret_cast<UINT_PTR*>(pBase + pRelocData->VirtualAddress + ((*pRelativeInfo) & 0xFFF));
+						*pPatch += reinterpret_cast<UINT_PTR>(locationDelta);
+					}
+				}
+				pRelocData = reinterpret_cast<IMAGE_BASE_RELOCATION*>(reinterpret_cast<BYTE*>(pRelocData) + pRelocData->SizeOfBlock);  // move further
+			}
+		}
+	}
+
+	// get import descriptor
+	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size) {
+		auto* pImportDescriptor = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
+		while (pImportDescriptor->Name) {
+
+			// dll is valid, load the sucker
+			const char* moduleName = reinterpret_cast<char*>(pBase + pImportDescriptor->Name);
+			HINSTANCE hDll = _LoadLibraryA(moduleName);
+			ULONG_PTR* pOrigThunk = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->OriginalFirstThunk);
+			ULONG_PTR* pFunc = reinterpret_cast<ULONG_PTR*>(pBase + pImportDescriptor->FirstThunk);
+
+			if (!pOrigThunk) { // sometimes they can be the same and IAT contains both
+				pOrigThunk = pFunc;
+			}
+
+			// parse all data ILT IAT correspondingly 
+
+			for (; *pOrigThunk; ++pOrigThunk, ++pFunc) { // both need to be upped so we can have the equal things
+				if (IMAGE_SNAP_BY_ORDINAL(*pOrigThunk)) { // if the import is by number
+					*pFunc = reinterpret_cast<ULONG_PTR>(_GetProcAddress(hDll, reinterpret_cast<char*>(*pOrigThunk & 0xFFF))); // this might cause issues or not
+				}
+				else { // by name
+					auto* pImport = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(pBase + (*pOrigThunk));
+					*pOrigThunk = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
+				}
+
+			}
+			++pImportDescriptor;
+		}
+	}
+
+	// FIX TLS 
+
+	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size) {
+		auto* pTLS = reinterpret_cast<IMAGE_TLS_DIRECTORY*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
+		auto* pCallback = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(pTLS->AddressOfCallBacks);
+		for (; pCallback && *pCallback; ++pCallback)
+			(*pCallback)(pBase, DLL_PROCESS_ATTACH, nullptr);
+	}
+
+	mData->hMod = reinterpret_cast<HINSTANCE>(pBase);
 }
