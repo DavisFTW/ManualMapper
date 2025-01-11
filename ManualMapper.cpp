@@ -80,11 +80,18 @@ void __stdcall ManualMapper::shellcode(MANUAL_MAPPING_DATA* mData) {
 			}
 			++pImportDescriptor;
 		}
-		// use ILT to get the ordinal or name
-
-		// use IAT to fix the corresponding imports address by using _getProcAddress
-
 	}
+
+	// FIX TLS 
+
+	if (pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].Size) {
+		auto* pTLS = reinterpret_cast<IMAGE_TLS_DIRECTORY*>(pBase + pOpt->DataDirectory[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress);
+		auto* pCallback = reinterpret_cast<PIMAGE_TLS_CALLBACK*>(pTLS->AddressOfCallBacks);
+		for (; pCallback && *pCallback; ++pCallback)
+			(*pCallback)(pBase, DLL_PROCESS_ATTACH, nullptr);
+	}
+
+	mData->hMod = reinterpret_cast<HINSTANCE>(pBase);
 }
 
 bool ManualMapper::run()

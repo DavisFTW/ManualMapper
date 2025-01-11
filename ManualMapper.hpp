@@ -44,13 +44,13 @@ private:
 	IMAGE_OPTIONAL_HEADER* pOldOptHeader = nullptr;
 	IMAGE_FILE_HEADER* pOldFileHeader = nullptr;
 	BYTE* pTargetBase = nullptr;
-	void __stdcall shellcode(MANUAL_MAPPING_DATA* mData);
 
 public:
 	ManualMapper(const HANDLE handle, BYTE* srcData, std::streampos fileSize)
 		: handle_(handle), srcData_(srcData), fileSize_(fileSize) {}
 
 	bool run();
+	void __stdcall shellcode(MANUAL_MAPPING_DATA* mData);
 };
 
 namespace memory{
