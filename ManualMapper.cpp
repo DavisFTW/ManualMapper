@@ -93,6 +93,8 @@ bool ManualMapper::run() {
 
 	data.pbase = pTargetBase;
 
+	data.fdwReasonParam = DLL_PROCESS_ATTACH;
+
 	// write the PE HEADERS FIRST
 	if (!memory::Write(this->handle_, this->pTargetBase, this->srcData_, 0x1000)) { // header is 0x1000 bytes large 
 		std::cerr << "Failed to write PE HEADERS\n";
@@ -129,7 +131,6 @@ bool ManualMapper::run() {
 		VirtualFreeEx(this->handle_, MappingDataAlloc, 0, MEM_RELEASE);
 		return false;
 	}
-	return true;
 
 	//Shell code
 	void* pShellcode = VirtualAllocEx(this->handle_, nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -150,6 +151,88 @@ bool ManualMapper::run() {
 
 	this->debug();
 
+	std::cerr << "Debug Information:\n";
+	std::cerr << "hProc: " << this->handle_ << "\n";
+	std::cerr << "pShellcode: " << pShellcode << "\n";
+	printf("MappingDataAlloc: 0x%p\n", MappingDataAlloc);
+
+
+	//debug
+
+	// Debugging before CreateRemoteThread
+	std::cerr << "Verifying Shellcode and MappingDataAlloc before thread creation...\n";
+
+	// Verify the shellcode in the target process
+	BYTE* shellcodeBuffer = new BYTE[0x1000];
+	if (!memory::Read(this->handle_, pShellcode, shellcodeBuffer, 0x1000)) {
+		std::cerr << "Failed to read shellcode from target process. Error Code: " << GetLastError() << "\n";
+	}
+	else {
+		std::cerr << "Shellcode successfully read from target process.\n";
+		std::cerr << "First 16 bytes of shellcode: ";
+		for (int i = 0; i < 16; ++i) {
+			std::cerr << std::hex << static_cast<int>(shellcodeBuffer[i]) << " ";
+		}
+		std::cerr << "\n";
+	}
+	delete[] shellcodeBuffer;
+
+	// Verify the MappingDataAlloc in the target process
+	MANUAL_MAPPING_DATA mappingDataBuffer{ 0 };
+	if (!memory::Read(this->handle_, MappingDataAlloc, &mappingDataBuffer, sizeof(MANUAL_MAPPING_DATA))) {
+		std::cerr << "Failed to read MappingDataAlloc from target process. Error Code: " << GetLastError() << "\n";
+	}
+	else {
+		std::cerr << "MappingDataAlloc successfully read from target process.\n";
+		std::cerr << "MappingDataAlloc contents:\n";
+		std::cerr << "  pLoadLibraryA: " << reinterpret_cast<void*>(mappingDataBuffer.pLoadLibraryA) << "\n";
+		std::cerr << "  pGetProcAddress: " << reinterpret_cast<void*>(mappingDataBuffer.pGetProcAddress) << "\n";
+		std::cerr << "  pRtlAddFunctionTable: " << reinterpret_cast<void*>(mappingDataBuffer.pRtlAddFunctionTable) << "\n";
+		std::cerr << "  pbase: " << static_cast<void*>(mappingDataBuffer.pbase) << "\n";
+		std::cerr << "  hMod: " << reinterpret_cast<void*>(mappingDataBuffer.hMod) << "\n";
+		std::cerr << "  fdwReasonParam: " << mappingDataBuffer.fdwReasonParam << "\n";
+		std::cerr << "  reservedParam: " << mappingDataBuffer.reservedParam << "\n";
+	}
+
+	// Confirm memory permissions for shellcode
+	MEMORY_BASIC_INFORMATION mbiShellcode = { 0 };
+	if (VirtualQueryEx(this->handle_, pShellcode, &mbiShellcode, sizeof(mbiShellcode))) {
+		std::cerr << "Shellcode memory information:\n";
+		std::cerr << "  BaseAddress: " << mbiShellcode.BaseAddress << "\n";
+		std::cerr << "  AllocationBase: " << mbiShellcode.AllocationBase << "\n";
+		std::cerr << "  AllocationProtect: " << mbiShellcode.AllocationProtect << "\n";
+		std::cerr << "  RegionSize: " << mbiShellcode.RegionSize << "\n";
+		std::cerr << "  State: " << mbiShellcode.State << "\n";
+		std::cerr << "  Protect: " << mbiShellcode.Protect << "\n";
+		std::cerr << "  Type: " << mbiShellcode.Type << "\n";
+	}
+	else {
+		std::cerr << "Failed to query shellcode memory information. Error Code: " << GetLastError() << "\n";
+	}
+
+	// Confirm memory permissions for MappingDataAlloc
+	MEMORY_BASIC_INFORMATION mbiMappingData = { 0 };
+	if (VirtualQueryEx(this->handle_, MappingDataAlloc, &mbiMappingData, sizeof(mbiMappingData))) {
+		std::cerr << "MappingDataAlloc memory information:\n";
+		std::cerr << "  BaseAddress: " << mbiMappingData.BaseAddress << "\n";
+		std::cerr << "  AllocationBase: " << mbiMappingData.AllocationBase << "\n";
+		std::cerr << "  AllocationProtect: " << mbiMappingData.AllocationProtect << "\n";
+		std::cerr << "  RegionSize: " << mbiMappingData.RegionSize << "\n";
+		std::cerr << "  State: " << mbiMappingData.State << "\n";
+		std::cerr << "  Protect: " << mbiMappingData.Protect << "\n";
+		std::cerr << "  Type: " << mbiMappingData.Type << "\n";
+	}
+	else {
+		std::cerr << "Failed to query MappingDataAlloc memory information. Error Code: " << GetLastError() << "\n";
+	}
+
+	std::cerr << "Verification complete. Proceeding to CreateRemoteThread...\n";
+
+
+	// debug end
+
+	
+
 	HANDLE hThread = CreateRemoteThread(this->handle_, nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(pShellcode), MappingDataAlloc, 0, nullptr);
 	if (!hThread) {
 		std::cerr << "thread Creation failed\n" << GetLastError();
@@ -158,7 +241,6 @@ bool ManualMapper::run() {
 		VirtualFreeEx(this->handle_, pShellcode, 0, MEM_RELEASE);
 		return false;
 	}
-	CloseHandle(hThread);
 
 	std::cout << "Thread created at " << pShellcode << " Waiting for shellcode to be executed" << std::endl;
 
@@ -191,11 +273,13 @@ bool ManualMapper::run() {
 		//pause
 		std::cerr << "Manual Mapping finished Press Enter to continue...\n";
 		std::cin.get();
-
+		CloseHandle(hThread);
 		return true;
 
 	}
 }
+
+
 void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 
 	// fix relocatios if needed ( base - preffered ) 
@@ -208,11 +292,11 @@ void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 
 	BYTE* pBase = mData->pbase;
 
-	const auto* pOpt = &reinterpret_cast<IMAGE_NT_HEADERS*>(pBase + reinterpret_cast<IMAGE_DOS_HEADER*>((uintptr_t)pBase)->e_lfanew)->OptionalHeader;
+	auto* pOpt = &reinterpret_cast<IMAGE_NT_HEADERS*>(pBase + reinterpret_cast<IMAGE_DOS_HEADER*>((uintptr_t)pBase)->e_lfanew)->OptionalHeader;
 
 
-	const auto _LoadLibraryA = mData->pLoadLibraryA;
-	const auto _GetProcAddress = mData->pGetProcAddress;
+	auto _LoadLibraryA = mData->pLoadLibraryA;
+	auto _GetProcAddress = mData->pGetProcAddress;
 
 	auto _DllMain = reinterpret_cast<f_DLL_ENTRY_POINT>(pBase + pOpt->AddressOfEntryPoint);
 
@@ -261,11 +345,11 @@ void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 
 			for (; *pOrigThunk; ++pOrigThunk, ++pFunc) { // both need to be upped so we can have the equal things
 				if (IMAGE_SNAP_BY_ORDINAL(*pOrigThunk)) { // if the import is by number
-					*pFunc = reinterpret_cast<ULONG_PTR>(_GetProcAddress(hDll, reinterpret_cast<char*>(*pOrigThunk & 0xFFF))); // this might cause issues or not
+					*pFunc = (ULONG_PTR)_GetProcAddress(hDll, reinterpret_cast<char*>(*pOrigThunk & 0xFFFF));
 				}
 				else { // by name
 					auto* pImport = reinterpret_cast<IMAGE_IMPORT_BY_NAME*>(pBase + (*pOrigThunk));
-					*pOrigThunk = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
+					*pFunc = (ULONG_PTR)_GetProcAddress(hDll, pImport->Name);
 				}
 
 			}
@@ -282,5 +366,9 @@ void __stdcall shellcode(MANUAL_MAPPING_DATA* mData) {
 			(*pCallback)(pBase, DLL_PROCESS_ATTACH, nullptr);
 	}
 
+	_DllMain(pBase, DLL_PROCESS_ATTACH , nullptr);
+
 	mData->hMod = reinterpret_cast<HINSTANCE>(pBase);
 }
+
+

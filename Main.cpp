@@ -10,7 +10,7 @@
 
 int main() {
     const char procName[] = "cs2.exe";
-    const char* dllPath = "C:\\path\\to\\your\\dll.dll";
+    const char* dllPath = "C:\\Users\\user6900\\Desktop\\Simple-Manual-Map-Injector-master\\hello-world-x64.dll";
 
     // Get process ID
     const DWORD procId = Utils::getProcId(procName);
@@ -79,9 +79,9 @@ int main() {
         CloseHandle(procHandle);
         delete[] pSrcData;
     }
-
-    
-    CloseHandle(procHandle);
-    delete[] pSrcData;
-    return EXIT_SUCCESS;
+    else {
+        CloseHandle(procHandle);
+        delete[] pSrcData;
+        return EXIT_SUCCESS;
+    }
 }
